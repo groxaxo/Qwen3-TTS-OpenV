@@ -1,31 +1,32 @@
 
-# Converting to OpenVINO --> Pytorch from scratch
+# Converting Pytorch to OpenVINO from scratch
 
 Without transformers. 
 
->NOTE
+
+This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers to then implement in [OpenArc](https://github.com/SearchSavior/OpenArc).
+
+AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, examples etc. I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
+
+>!NOTE
 > To use a finetuned or otherwise modified version of Qwen3-TTS in OpenArc, you need to export using ov_convert.py
 
-This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers to then implement in [OpenArc](https://github.com/SearchSavior/OpenArc). 
 
-
-AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, examples etc. The long timeline was because I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
-
-Optimization includes 
+## Optimizations 
 
 - making choices in the export design which anticpate where kernel fusions happen during compile before and during inference time 
 
-- Correctly assessing tradeoffs of stateful pipeline, which basically means passing hidden states with logits between subgraphs
+- Assessing tradeoffs of stateful pipeline, which basically means passing hidden states with logits between subgraphs
 
-- through testing I discovered that the code predictor was faster on CPU ie, the compiler chooses better kernels. Even with copy it's much faster.
+- through testing I discovered that the code predictor was faster on CPU ie, the compiler chooses better kernels. Even with copy it's much faster; most ops which are sequential are faster on CPU; in general this is true, but OV has long history of utilizing hardware features
 
 That's what I remember from development; another learning from this project was to take better notes.
 
 
-This repo contains end to end qwen3-tts:
+This repo contains end to end qwen3-tts for all tasks:
 
 - Once in `torch.nn.functional as F`
-  - So tensors only, without the nn.module class-like approach. No bueno for openvino export.
+  - So tensors only, without the nn.module class-like approach. No bueno for openvino export, discovered the long way.
 
 - Again using `import torch.nn as nn`
   - This ended up being neccessary for the OpenVINO pytorch trace to work properly
@@ -37,7 +38,7 @@ At the time I used an A770 and Xeon W2255 but since deployment in OpenArc there 
 
 ## Designing an Export to OpenVINO IR
 
-Intel has done very little to document the actual procedure around building IR in a from scratch way; almost all the examples import from `transformers` and inherit all `transformers` complexity.
+Intel has done very little to document the actual procedure around building IR in a from scratch way; almost all the examples import from `transformers` and inherit all `transformers` complexity which makes makes the code intel does publish quite terse; to make sense of how they 
 
 Here is the procedure for converting *any* pytorch model to OpenVINO IR;
 
@@ -50,6 +51,51 @@ Here is the procedure for converting *any* pytorch model to OpenVINO IR;
   - making choices about what device makes sense to use for the ops required for that part of the pipeline by testing; compiling an openvino model is like 
   - through profiling and ensuring correctness vs pytorch on CPU slowly work in the openvino details like `fuse_cache_reorder`
   - I used the example from openvino-dev-samples in the [notebook](https://github.com/openvinotoolkit/openvino_notebooks/blob/latest/notebooks/qwen3-tts/qwen_3_tts_helper.py) for inspiration, but my implementation diverges and makes some different choices around submodel design.
+
+## Project Structure
+
+```text
+.
+├── CLAUDE_convert_from_functional_to_module.md # Notes from functional-to-module refactoring work.
+├── snip_snip.py                                # Local scratch/helper script from development experiments.
+
+├── openivno_notebook_reference/                # OpenVINO notebook reference material used for comparison.
+│   └── qwen_3_tts_helper.py                    # Upstream helper code that informed export/inference design.
+├── 
+qwen3_tts_transformers_reference/           # Embedded Transformers-based reference implementation.
+│   ├── README.md                               # Upstream reference docs.
+│   ├── pyproject.toml                          # Upstream package metadata/dependencies.
+│   ├── assets/                                 # Reference assets (including technical report PDF).
+│   └── qwen_tts/                               # Upstream implement. Not installed or used; context for the agent
+└── src/                                        # Primary source code for this project.
+    
+    ├── openvino/                               # OpenVINO conversion and runtime entrypoints.
+    │   ├── ov_convert.py                       # Exports PyTorch checkpoints into OpenVINO IR submodels.
+    │   └── ov_infer.py                         # Runs OpenVINO inference for supported voice modes.
+    
+    ├── torch_functional/                       # Tensor/functional-style PyTorch implementation.
+    │   ├── qwen3_tts.py                        # Functional model flow and generation logic.
+    │   ├── qwen3_tts_tokenizer.py              # Tokenization utilities for functional implementation.
+    │   └── test_tts.py                         # Functional implementation tests/examples.
+    
+    ├── torch_modules/                          # nn.Module-based PyTorch implementation for tracing/export.
+    │   ├── talker.py                           # Main orchestration module for TTS generation.
+    │   ├── speech_decoder.py                   # Speech decoder model components.
+    │   ├── code_predictor.py                   # Acoustic code prediction module.
+    │   ├── speaker_encoder.py                  # Speaker conditioning and embedding module.
+    │   ├── generate.py                         # Shared generation helpers for module-based stack.
+    │   └── constants.py                        # Shared constants/config values.
+    └── test_modules.py                         # inference script for module-based implementation.
+```
+
+## How to learn from this project
+
+
+Unlike other from scratch implementation repos this one encourages using AI tools to help you learn. Have the agent explore and explain the architecture of qwen-tts while you read the paper; then interrogate the code to understand it's business. 
+
+This was my first attempt to do a reasonably hard architecture, which was intentional; I needed to prove out that making bespoke implementions outside of what's offic
+
+Lessons in this codebase can be used to design an export for ANY pytorch model in all of transformers, documenting a deeper dive you can follow `outside` transformers abstraction.
 
 
 ## Usage
@@ -112,12 +158,6 @@ uv run src/openvino/ov_convert.py \
   --cp-weight-format fp16
 ```
 
-
-
-
-
-
-
 Run these commands from the repository root.
 
 `voice_design`
@@ -153,6 +193,15 @@ uv run src/openvino/ov_infer.py \
   --device GPU.0
 ```
 
+## Future work
+
+- PRs not related to OpenArc development may not be accepted, as this implementation must remain *mostly* cannonical. 
+
+- PRs which implement an NPU pathway are most welcome! The foundation is laid, but I don't have an NPU device to test with.
+
+
+
+
 ## Acknowledgements 
 
 ```
@@ -165,3 +214,5 @@ uv run src/openvino/ov_infer.py \
 ```
 
 [OpenVINO Notebooks](https://github.com/openvinotoolkit/openvino_notebooks)
+
+OpenArc community for their support
