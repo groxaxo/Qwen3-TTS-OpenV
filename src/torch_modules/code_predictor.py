@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from qwen3_tts_tokenizer import rms_norm, swiglu_ffn
+from torch_functional.qwen3_tts_tokenizer import rms_norm, swiglu_ffn
 
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:

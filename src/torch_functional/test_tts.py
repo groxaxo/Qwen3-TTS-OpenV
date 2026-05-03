@@ -3,7 +3,7 @@ import argparse
 import wave
 import numpy as np
 import torch
-import qwen3_tts
+from torch_functional import qwen3_tts
 
 
 def main():

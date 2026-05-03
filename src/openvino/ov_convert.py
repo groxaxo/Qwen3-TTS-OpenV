@@ -37,8 +37,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import qwen3_tts
-from modules import (
+from torch_functional import qwen3_tts
+from torch_modules import (
     CPCodecEmbedding,
     CodePredictorBackbone,
     IntegerInputSpeechDecoder,
@@ -447,9 +447,17 @@ class CPCodecEmbeddingForExport(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def get_compression_config(weight_format: str):
+def get_compression_config(weight_format: str, cp_weight_format: str | None = None):
+    """Build per-submodel compression config.
+
+    Args:
+        weight_format:    Global compression: 'int4', 'int8', or 'fp16'.
+        cp_weight_format: Override for code predictor only (e.g. 'fp16' when
+                          the GPU plugin produces NaN with INT8 on small models).
+                          Defaults to *weight_format* when not specified.
+    """
     if weight_format == "int4":
-        return {
+        cfg = {
             "transformer": {
                 "mode": nncf.CompressWeightsMode.INT4_SYM,
                 "group_size": 128,
@@ -459,8 +467,8 @@ def get_compression_config(weight_format: str):
                 "mode": nncf.CompressWeightsMode.INT8_SYM,
             },
         }
-    if weight_format == "int8":
-        return {
+    elif weight_format == "int8":
+        cfg = {
             "transformer": {
                 "mode": nncf.CompressWeightsMode.INT8_SYM,
             },
@@ -468,7 +476,26 @@ def get_compression_config(weight_format: str):
                 "mode": nncf.CompressWeightsMode.INT8_SYM,
             },
         }
-    return None
+    else:
+        cfg = None
+
+    # Apply code_predictor override
+    if cfg is not None:
+        cp_fmt = cp_weight_format or weight_format
+        if cp_fmt == "fp16":
+            # No compression — leave as traced fp16
+            cfg["code_predictor"] = None
+        elif cp_fmt == "int8":
+            cfg["code_predictor"] = {"mode": nncf.CompressWeightsMode.INT8_SYM}
+        elif cp_fmt == "int4":
+            cfg["code_predictor"] = {
+                "mode": nncf.CompressWeightsMode.INT4_SYM,
+                "group_size": 128,
+                "ratio": 1.0,
+            }
+        # else: falls back to "transformer" key via .get() in convert_code_predictor
+
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +771,7 @@ def convert_code_predictor(
         input_spec=input_spec,
         input_names=input_names,
         output_names=output_names,
-        compression_args=compression_config["transformer"] if compression_config else None,
+        compression_args=compression_config.get("code_predictor", compression_config["transformer"]) if compression_config else None,
         stateful_config={
             "state_pairs": state_pairs,
             "cache_tail_dims": cache_tail_dims,
@@ -919,6 +946,7 @@ def convert_pipeline(
     weight_format: str,
     output_dir: Path,
     model_type_override: str = None,
+    cp_weight_format: str | None = None,
 ):
     """Convert all submodels for a Qwen3-TTS model variant.
 
@@ -929,6 +957,7 @@ def convert_pipeline(
         model_type_override: If provided, overrides the tts_model_type field in
                              config.json.  Accepted values: 'voice_clone',
                              'voice_design', 'custom_voice'.
+        cp_weight_format:    Override compression for code predictor only.
     """
     state = qwen3_tts.load_model(str(model_path))
     config = state["config"]
@@ -938,7 +967,7 @@ def convert_pipeline(
 
     # Resolve model type — CLI arg wins over config
     model_type = model_type_override or config.get("tts_model_type", "custom_voice")
-    compression_config = get_compression_config(weight_format)
+    compression_config = get_compression_config(weight_format, cp_weight_format)
 
     print(f"Model type: {model_type}")
     print(f"Weight format: {weight_format}")
@@ -1009,6 +1038,16 @@ def main():
             "speech_tokenizer/speech_encoder.xml for ICL support."
         ),
     )
+    parser.add_argument(
+        "--cp-weight-format",
+        choices=["int4", "int8", "fp16"],
+        default=None,
+        help=(
+            "Override weight format for the code predictor only.  "
+            "Defaults to --weight-format.  Use 'fp16' when the GPU "
+            "plugin produces NaN with quantized code predictor weights."
+        ),
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model_path).expanduser().resolve()
@@ -1018,7 +1057,7 @@ def main():
         raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
     os.makedirs(output_dir, exist_ok=True)
-    convert_pipeline(model_path, args.weight_format, output_dir, args.model_type)
+    convert_pipeline(model_path, args.weight_format, output_dir, args.model_type, args.cp_weight_format)
 
 
 if __name__ == "__main__":

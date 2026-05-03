@@ -12,8 +12,8 @@ import wave
 import numpy as np
 import torch
 
-import qwen3_tts
-from modules import (
+from torch_functional import qwen3_tts
+from torch_modules import (
     CodePredictorBackbone,
     SpeechDecoder,
     TalkerBackbone,

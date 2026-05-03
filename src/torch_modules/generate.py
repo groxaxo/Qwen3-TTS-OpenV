@@ -6,8 +6,8 @@ import time
 import numpy as np
 import torch
 
-from qwen3_tts import apply_repetition_penalty, sample_token, build_talker_input
-from qwen3_tts_tokenizer import split_rvq_decode
+from torch_functional.qwen3_tts import apply_repetition_penalty, build_talker_input, sample_token
+from torch_functional.qwen3_tts_tokenizer import split_rvq_decode
 from .talker import TalkerBackbone
 from .code_predictor import CodePredictorBackbone
 from .speech_decoder import SpeechDecoder

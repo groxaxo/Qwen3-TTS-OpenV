@@ -1,0 +1,17 @@
+Qwen3-TTS-12Hz-0.6B-Base/
+Qwen3-TTS-12Hz-1.7B-Base/
+Qwen3-TTS-12Hz-1.7B-CustomVoice/
+Qwen3-TTS-12Hz-1.7B-VoiceDesign/
+Qwen3-TTS-25Hz-1.7B-Base/
+Qwen3-TTS-25Hz-1.7B-CustomVoice/
+Qwen3-TTS-25Hz-1.7B-VoiceDesign/
+Qwen3-TTS-25Hz-1.7B-Base/
+Qwen3-TTS-25Hz-1.7B-CustomVoice/
+Qwen3-TTS-25Hz-1.7B-VoiceDesign/
+ov_qwen3_tts_models/
+ov_attempt_1/
+*.wav
+
+src/ov/customvoice-1.7b-int8-ov/
+src/ov/voicedesign-1.7b-int8-ov/
+src/ov/base-1.7b-int8-ov/

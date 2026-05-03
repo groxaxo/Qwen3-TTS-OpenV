@@ -200,6 +200,8 @@ class ModelLoadConfig(BaseModel):
 
     ov_dir: str = Field(description="Path to the converted OpenVINO model directory.")
     device: str = Field(default="CPU", description="OpenVINO device (e.g. 'CPU', 'GPU').")
+    cp_device: str | None = Field(default=None, description="Override device for code predictor (e.g. 'CPU' when GPU produces NaN).")
+    cp_f32: bool = Field(default=False, description="Force f32 precision for code predictor on GPU (fixes NaN with small models).")
     model_type: ModelType = Field(description="Which model variant to load.")
 
 
@@ -496,7 +498,9 @@ class OVQwen3TTS:
 
         talker_c = core.compile_model(str(p / "talker.xml"), device)
         self._talker_req = talker_c.create_infer_request()
-        cp_c = core.compile_model(str(p / "code_predictor.xml"), device)
+        cp_device = config.cp_device or device
+        cp_props = {"INFERENCE_PRECISION_HINT": "f32"} if config.cp_f32 else {}
+        cp_c = core.compile_model(str(p / "code_predictor.xml"), cp_device, cp_props)
         self._cp_req = cp_c.create_infer_request()
 
         # Voice-clone models (only when needed)
@@ -886,6 +890,7 @@ class OVQwen3TTS:
 
         prefill = np.concatenate([past_hidden, first_code_embed], axis=1)
         cos, sin = H.slice_rope(self._cp_cos, self._cp_sin, 0, 2)
+
         logits, _ = self._cp_infer(prefill, cos, sin, gen_steps=0)
 
         tid = H.sample_token(
@@ -1072,6 +1077,8 @@ mode usage:
     parser.add_argument("--text", required=True, help="Text to synthesise")
     parser.add_argument("--output", default="output.wav", help="Output WAV path")
     parser.add_argument("--device", default="CPU", help="OpenVINO device")
+    parser.add_argument("--cp-device", default=None, help="Override device for code predictor (e.g. CPU when GPU produces NaN)")
+    parser.add_argument("--cp-f32", action="store_true", help="Force f32 precision for code predictor on GPU (fixes NaN with small models)")
 
     # custom_voice
     cv = parser.add_argument_group("custom_voice mode")
@@ -1150,7 +1157,8 @@ mode usage:
     # Run
     engine = OVQwen3TTS()
     engine.load_model(ModelLoadConfig(
-        ov_dir=args.ov_dir, device=args.device, model_type=model_type,
+        ov_dir=args.ov_dir, device=args.device, cp_device=args.cp_device,
+        cp_f32=args.cp_f32, model_type=model_type,
     ))
     wav, sr = engine.generate(request)
     asyncio.run(engine.unload_model())

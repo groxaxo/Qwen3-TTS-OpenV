@@ -1,0 +1,27 @@
+[project]
+name = "ov-qwen3-tts"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "librosa>=0.11.0",
+    "nncf>=3.1.0",
+    "numpy>=2.4.4",
+    "openvino>=2026.1.0",
+    "pydantic>=2",
+    "safetensors>=0.7.0",
+    "soundfile>=0.13.1",
+    "torch>=2.11.0",
+    "transformers>=5.7.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }

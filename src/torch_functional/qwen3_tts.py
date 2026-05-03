@@ -8,7 +8,13 @@ import numpy as np
 from safetensors.torch import load_file
 from transformers import AutoTokenizer
 
-from qwen3_tts_tokenizer import rms_norm, swiglu_ffn, decode, encode
+from torch_functional.qwen3_tts_tokenizer import (
+    decode,
+    encode,
+    load_tokenizer,
+    rms_norm,
+    swiglu_ffn,
+)
 
 def list_weight_keys(state):
     """Print all weight keys grouped by prefix for debugging."""
@@ -55,7 +61,6 @@ def load_model(model_path: str) -> dict:
             generate_config = json.load(f)
 
     # Load speech tokenizer
-    from qwen3_tts_tokenizer import load_tokenizer
     speech_tokenizer = load_tokenizer(model_path)
 
     # Extract speaker encoder weights if present (Base model for voice clone)
