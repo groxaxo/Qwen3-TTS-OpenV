@@ -3,10 +3,13 @@
 
 Without transformers. 
 
+>NOTE
+> To use a finetuned or otherwise modified version of Qwen3-TTS in OpenArc, you need to export using ov_convert.py
 
-This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers. 
+This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers to then implement in [OpenArc](https://github.com/SearchSavior/OpenArc). 
 
-AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, examples etc. The long timeline was because I took time to study the code, test it, and optimize heavily. 
+
+AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, examples etc. The long timeline was because I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
 
 Optimization includes 
 
@@ -57,7 +60,11 @@ Clone the repo and run
 uv sync
 ```
 
+obtain the Qwen3-TTS pytorch models from the [hub](https://huggingface.co/collections/Qwen/qwen3-tts)
 
+- 1.7B export is fully supported
+- 0.6B export had some issues I didn't finish working out >:D
+- the pytorch code covers both
 
 `ov_convert` (PyTorch -> OpenVINO IR)
 
@@ -146,3 +153,15 @@ uv run src/openvino/ov_infer.py \
   --device GPU.0
 ```
 
+## Acknowledgements 
+
+```
+@article{Qwen3-TTS,
+  title={Qwen3-TTS Technical Report},
+  author={Hangrui Hu and Xinfa Zhu and Ting He and Dake Guo and Bin Zhang and Xiong Wang and Zhifang Guo and Ziyue Jiang and Hongkun Hao and Zishan Guo and Xinyu Zhang and Pei Zhang and Baosong Yang and Jin Xu and Jingren Zhou and Junyang Lin},
+  journal={arXiv preprint arXiv:2601.15621},
+  year={2026}
+}
+```
+
+[OpenVINO Notebooks](https://github.com/openvinotoolkit/openvino_notebooks)
