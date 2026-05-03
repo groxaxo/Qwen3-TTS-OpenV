@@ -1,5 +1,5 @@
 
-# Converting Pytorch to OpenVINO from scratch
+# Converting Qwen3-TTS Pytorch to OpenVINO from scratch
 
 Without transformers. 
 
