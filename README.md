@@ -6,7 +6,12 @@ Without transformers.
 
 This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers to then implement in [OpenArc](https://github.com/SearchSavior/OpenArc).
 
-AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, examples etc. I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
+AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, issues, examples etc. I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
+
+My objective for this project was to support Qwen3-TTS in OpenArc, and to untangle the export process and force the complexity onto the openvino part, away from the transformers part. As such, the `ov_convert.py` alongside `src/torch_modules` contains source code learnings which can be applied to ANY pytorch model. I reccomend exploring with agents as you study the source, since the openvino docs do not cover most of what's in this repo.
+
+Who knows, maybe my clankers and I made some bad choices; however I can now voice clone elmo (and disturb my wife) to my hearts content using Intel GPUs, and am confident the next model I choose to port will be an easier job. 
+
 
 >!NOTE
 > To use a finetuned or otherwise modified version of Qwen3-TTS in OpenArc, you need to export using ov_convert.py
@@ -93,9 +98,9 @@ qwen3_tts_transformers_reference/           # Embedded Transformers-based refere
 
 Unlike other from scratch implementation repos this one encourages using AI tools to help you learn. Have the agent explore and explain the architecture of qwen-tts while you read the paper; then interrogate the code to understand it's business. 
 
-This was my first attempt to do a reasonably hard architecture, which was intentional; I needed to prove out that making bespoke implementions outside of what's offic
+This was my first attempt to do a reasonably hard architecture, which was intentional; I needed to prove out that making bespoke implementions outside of what's offically supported was doable. Plus, if I'm honest, the bad documentation and high complexity of OpenVINO pushed me to discover what goes on under the hood. 
 
-Lessons in this codebase can be used to design an export for ANY pytorch model in all of transformers, documenting a deeper dive you can follow `outside` transformers abstraction.
+Lessons in this codebase can be used to design an export for ANY pytorch model, documenting a deeper dive you can follow `outside` transformers abstractions than anything close to what Intel provides. Even the optimum-intel codebase is difficult to understand since abstraction level is so high but here the process is spelled out.
 
 
 ## Usage
