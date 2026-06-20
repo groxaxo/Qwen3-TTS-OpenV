@@ -1,223 +1,268 @@
+# Qwen3-TTS OpenVINO
 
-# Converting Qwen3-TTS Pytorch to OpenVINO from scratch
+> **OpenVINO inference for [Qwen3-TTS](https://arxiv.org/abs/2601.15621)** —
+> built without `transformers`, runs on Intel CPUs / GPUs / NPUs.
 
-Without transformers. 
+---
 
+## 🙏 Credits
 
-This repo contains **three** implementations of Qwen3-TTS I made over two months in early 2026 as a way to get inside the complex process of building an OpenVINO IR from scratch, without transformers to then implement in [OpenArc](https://github.com/SearchSavior/OpenArc).
+This project is a fork of
+**[SearchSavior/Qwen3-TTS-OpenV](https://github.com/SearchSavior/Qwen3-TTS-OpenV)**
+by **Emerson Tatelbaum** ([@SearchSavior](https://github.com/SearchSavior)).
+The original work — including the PyTorch → OpenVINO IR export pipeline, the
+`nn.Module`-based refactor of Qwen3-TTS, and the three-task reference
+implementations — is what made this possible.
 
-AI assistance was used during development; however, even Opus 4.5 struggled to apply OpenVINO conventions I have learned from developing OpenArc, studying the src, issues, examples etc. I made effort to study the code, test it, and optimize heavily. An awesome way to learn the architecture from zero, with a highly optimized inference implementation included. Pushing performance further would require authoring custom opencl GPU kernels for slow ops, a procedure left to future work.
+Emerson's goal was to support Qwen3-TTS in
+[OpenArc](https://github.com/SearchSavior/OpenArc). This fork adds a FastAPI
+HTTP server and the **`sd_device` override** that makes the speech decoder
+work correctly on Intel Iris Xe iGPUs (see [Fix story](#-fix-story-sd_device-on-x30-w)
+below).
 
-My objective for this project was to support Qwen3-TTS in OpenArc, and to untangle the export process and force the complexity onto the openvino part, away from the transformers part. As such, the `ov_convert.py` alongside `src/torch_modules` contains source code learnings which can be applied to ANY pytorch model. I reccomend exploring with agents as you study the source, since the openvino docs do not cover most of what's in this repo.
+Paper:
+> Hu et al., *Qwen3-TTS Technical Report*, arXiv:2601.15621, 2026.
+> [arxiv.org/abs/2601.15621](https://arxiv.org/abs/2601.15621)
 
-Who knows, maybe my clankers and I made some bad choices; however I can now voice clone elmo (and disturb my wife) to my hearts content using Intel GPUs, and am confident the next model I choose to port will be an easier job. 
+---
 
+## ✨ What's in this fork
 
->!NOTE
-> To use a finetuned or otherwise modified version of Qwen3-TTS in OpenArc, you need to export using ov_convert.py
+| Feature | Source | Notes |
+|---|---|---|
+| PyTorch → OpenVINO IR export (all three tasks) | original | INT8 / FP16 / FP32, weight-format selectable per submodule |
+| `nn.Module`-based reference implementation | original | tracing-friendly, no `transformers` |
+| OpenVINO inference engine (`ov_infer.py`) | original | custom-voice, voice-design, voice-clone |
+| **FastAPI HTTP server (`server.py`)** | **this fork** | `POST /synthesize`, `POST /synthesize/json`, `GET /health`, `GET /speakers` |
+| **`sd_device` override** | **this fork** | speech decoder can run on a different OpenVINO device than the talker |
 
+---
 
-## Optimizations 
+## 🚀 Quick start
 
-- making choices in the export design which anticpate where kernel fusions happen during compile before and during inference time 
+### 1. Export a Qwen3-TTS checkpoint to OpenVINO IR
 
-- Assessing tradeoffs of stateful pipeline, which basically means passing hidden states with logits between subgraphs
-
-- through testing I discovered that the code predictor was faster on CPU ie, the compiler chooses better kernels. Even with copy it's much faster; most ops which are sequential are faster on CPU; in general this is true, but OV has long history of utilizing hardware features
-
-That's what I remember from development; another learning from this project was to take better notes.
-
-
-This repo contains end to end qwen3-tts for all tasks:
-
-- Once in `torch.nn.functional as F`
-  - So tensors only, without the nn.module class-like approach. No bueno for openvino export, discovered the long way.
-
-- Again using `import torch.nn as nn`
-  - This ended up being neccessary for the OpenVINO pytorch trace to work properly
-  - `nn.Module` does a better job of keeping things organized
-
-- And finally a complete OpenVINO implementation of all three tasks, validated for 1.7B on CPUs and GPUs. 
-
-At the time I used an A770 and Xeon W2255 but since deployment in OpenArc there have been no portability issues to other hardware yet.
-
-## Designing an Export to OpenVINO IR
-
-Intel has done very little to document the actual procedure around building IR in a from scratch way; almost all the examples import from `transformers` and inherit all `transformers` complexity which makes makes the code intel does publish quite terse; to make sense of how they 
-
-Here is the procedure for converting *any* pytorch model to OpenVINO IR;
-
-- Define your operations as `nn.Modules` that contain some logic, and end in a `forward` that returns some data the next step needs.
-
-- Make a thin `nn.Module` on top of each `forward` call
-
-- In that way making an IR requires
-  - knowing your models data flow
-  - making choices about what device makes sense to use for the ops required for that part of the pipeline by testing; compiling an openvino model is like 
-  - through profiling and ensuring correctness vs pytorch on CPU slowly work in the openvino details like `fuse_cache_reorder`
-  - I used the example from openvino-dev-samples in the [notebook](https://github.com/openvinotoolkit/openvino_notebooks/blob/latest/notebooks/qwen3-tts/qwen_3_tts_helper.py) for inspiration, but my implementation diverges and makes some different choices around submodel design.
-
-## Project Structure
-
-```text
-.
-├── CLAUDE_convert_from_functional_to_module.md # Notes from functional-to-module refactoring work.
-├── snip_snip.py                                # Local scratch/helper script from development experiments.
-
-├── openivno_notebook_reference/                # OpenVINO notebook reference material used for comparison.
-│   └── qwen_3_tts_helper.py                    # Upstream helper code that informed export/inference design.
-├── 
-qwen3_tts_transformers_reference/           # Embedded Transformers-based reference implementation.
-│   ├── README.md                               # Upstream reference docs.
-│   ├── pyproject.toml                          # Upstream package metadata/dependencies.
-│   ├── assets/                                 # Reference assets (including technical report PDF).
-│   └── qwen_tts/                               # Upstream implement. Not installed or used; context for the agent
-└── src/                                        # Primary source code for this project.
-    
-    ├── openvino/                               # OpenVINO conversion and runtime entrypoints.
-    │   ├── ov_convert.py                       # Exports PyTorch checkpoints into OpenVINO IR submodels.
-    │   └── ov_infer.py                         # Runs OpenVINO inference for supported voice modes.
-    
-    ├── torch_functional/                       # Tensor/functional-style PyTorch implementation.
-    │   ├── qwen3_tts.py                        # Functional model flow and generation logic.
-    │   ├── qwen3_tts_tokenizer.py              # Tokenization utilities for functional implementation.
-    │   └── test_tts.py                         # Functional implementation tests/examples.
-    
-    ├── torch_modules/                          # nn.Module-based PyTorch implementation for tracing/export.
-    │   ├── talker.py                           # Main orchestration module for TTS generation.
-    │   ├── speech_decoder.py                   # Speech decoder model components.
-    │   ├── code_predictor.py                   # Acoustic code prediction module.
-    │   ├── speaker_encoder.py                  # Speaker conditioning and embedding module.
-    │   ├── generate.py                         # Shared generation helpers for module-based stack.
-    │   └── constants.py                        # Shared constants/config values.
-    └── test_modules.py                         # inference script for module-based implementation.
-```
-
-## How to learn from this project
-
-
-Unlike other from scratch implementation repos this one encourages using AI tools to help you learn. Have the agent explore and explain the architecture of qwen-tts while you read the paper; then interrogate the code to understand it's business. 
-
-This was my first attempt to do a reasonably hard architecture, which was intentional; I needed to prove out that making bespoke implementions outside of what's offically supported was doable. Plus, if I'm honest, the bad documentation and high complexity of OpenVINO pushed me to discover what goes on under the hood. 
-
-Lessons in this codebase can be used to design an export for ANY pytorch model, documenting a deeper dive you can follow `outside` transformers abstractions than anything close to what Intel provides. Even the optimum-intel codebase is difficult to understand since abstraction level is so high but here the process is spelled out.
-
-
-## Usage
-
-Clone the repo and run 
-
-```
+```bash
 uv sync
-```
-
-obtain the Qwen3-TTS pytorch models from the [hub](https://huggingface.co/collections/Qwen/qwen3-tts)
-
-- 1.7B export is fully supported
-- 0.6B export had some issues I didn't finish working out >:D
-- the pytorch code covers both
-
-`ov_convert` (PyTorch -> OpenVINO IR)
-
-Converts a Qwen3-TTS checkpoint directory into an OpenVINO model directory.
-
-```bash
-uv run src/openvino/ov_convert.py \
-  --model-path <qwen3_tts_model_dir> \
-  --new <output_ov_dir> \
-  --weight-format <fp16|int8|int4> \
-  [--model-type <voice_clone|voice_design|custom_voice>] \
-  [--cp-weight-format <fp16|int8|int4>]
-```
-
-Argument notes:
-- `--model-path`: path to the source Qwen3-TTS model directory.
-- `--new`: output directory for converted OpenVINO IR files.
-- `--weight-format`: default precision/compression for exported modules.
-- `--model-type`: optional override for `tts_model_type` from `config.json`.
-- `--cp-weight-format`: optional code predictor override; use `fp16` if quantized CP causes NaNs on GPU.
-
-Examples:
-
-```bash
-# voice_design export (INT8)
-uv run src/openvino/ov_convert.py \
-  --model-path ./Qwen3-TTS-1.7B \
-  --new ./voicedesign-1.7b-int8-ov \
-  --model-type voice_design \
-  --weight-format int8
-
-# custom_voice export (INT8)
 uv run src/openvino/ov_convert.py \
   --model-path ./Qwen3-TTS-1.7B \
   --new ./customvoice-1.7b-int8-ov \
   --model-type custom_voice \
   --weight-format int8
-
-# voice_clone export (INT8, but keep code predictor in FP16 for GPU stability)
-uv run src/openvino/ov_convert.py \
-  --model-path ./Qwen3-TTS-1.7B \
-  --new ./voiceclone-1.7b-int8-ov \
-  --model-type voice_clone \
-  --weight-format int8 \
-  --cp-weight-format fp16
 ```
 
-Run these commands from the repository root.
+### 2. Run the FastAPI server
 
-`voice_design`
 ```bash
-uv run src/openvino/ov_infer.py \
-  --ov-dir ./voicedesign-1.7b-int8-ov \
-  --mode voice_design \
-  --text "This is a test of Echo9Zulu's Qwen3 TTS OpenVINO implementation for the voice design task." \
-  --voice-description "Speak like an announcer over an intercom" \
-  --output voicedesign_int8.wav
+uv run server.py \
+  --host 0.0.0.0 --port 8765 \
+  --device GPU --cp-device CPU --sd-device CPU \
+  --ov-dir ./customvoice-1.7b-int8-ov
 ```
 
-`custom_voice`
+`--sd-device CPU` is **required on x30w-k (Iris Xe iGPU)** — see the fix story
+below. On other Intel hardware the default (`= --device`) usually works.
+
+### 3. Synthesize speech
+
+```bash
+curl -X POST http://localhost:8765/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hola Facu, soy Qwen3 TTS.","speaker":"vivian","language":"spanish"}' \
+  -o out.wav
+```
+
+Or use the CLI mode for one-off renders (no server):
+
 ```bash
 uv run src/openvino/ov_infer.py \
   --ov-dir ./customvoice-1.7b-int8-ov \
   --mode custom_voice \
-  --text "This is a test of Echo9Zulu's Qwen3 TTS OpenVINO implementation for the custom voice task." \
-  --speaker uncle_fu \
-  --output customvoice_int8.wav \
-  --device GPU.0
+  --text "Hola Facu" \
+  --speaker vivian \
+  --output hola.wav
 ```
 
-`voice_clone`
+### 4. Health check
+
 ```bash
-uv run src/openvino/ov_infer.py \
-  --ov-dir ./voiceclone-1.7b-int8-ov \
-  --mode voice_clone \
-  --text "This is a test of Echo9Zulu's Qwen3 TTS OpenVINO implementation for the voice clone task." \
-  --ref-audio ./elmo_sample.wav \
-  --ref-text "Color? Red! [laughs] Or, or who's your best friend? Um, Elmo's pet goldfish, Dorothy..." \
-  --output voiceclone_elmo_int8.wav \
-  --device GPU.0
+curl http://localhost:8765/health
+# → {"status":"ready","model_type":"custom_voice","device":"GPU","cp_device":"CPU","sd_device":"CPU",...}
 ```
 
-## Future work
+---
 
-- PRs not related to OpenArc development may not be accepted, as this implementation must remain *mostly* cannonical. 
+## 🔧 Fix story: `sd_device` on x30w-k
 
-- PRs which implement an NPU pathway are most welcome! The foundation is laid, but I don't have an NPU device to test with.
+The original repo's `ov_infer.py` exposed only `--device` (talker) and
+`--cp-device` (code predictor). The third component, the **speech decoder**
+(vocoder), inherited `--device`.
 
+On **x30w-k** (Intel i5-1240P with Iris Xe iGPU, OpenVINO INT8), compiling the
+speech decoder on GPU produces **broken audio**: RMS ~0.015, peak ~0.08,
+near-flat temporal modulation. The same codec codes, decoded on CPU, produce
+clean audio (RMS ~0.105, peak ~0.70) — and CPU is also **15× faster** than
+the iGPU path (1.5 s vs 23.4 s for the same input).
 
+Diagnosed via same-codes re-decode experiment on 2026-06-20:
 
+| Decoder device | RMS | peak | mod_var | time | STT works? |
+|---|---|---|---|---|---|
+| GPU (default) | 0.0156 | 0.0795 | 0.0009 | 23.4 s | ❌ empty |
+| **CPU (correct)** | **0.1052** | **0.6988** | **0.0718** | **1.5 s** | **✅** |
 
-## Acknowledgements 
+The fix:
 
+1. New `sd_device` field in `ModelLoadConfig` (default = same as `device`).
+2. New CLI flag `--sd-device`.
+3. New env var `OV_SD_DEVICE` for the FastAPI server.
+4. `/health` reports `sd_device` so you can verify the configuration.
+
+Total RTF dropped from ~6.9 to ~2.1 with this fix on x30w-k.
+
+---
+
+## 🧬 Project structure
+
+```text
+.
+├── README.md                              ← you are here
+├── pyproject.toml                         ← deps (fastapi, uvicorn, openvino, librosa, …)
+├── server.py                              ← FastAPI HTTP server (this fork)
+│
+├── src/
+│   ├── openvino/
+│   │   ├── ov_convert.py                  ← PyTorch → OpenVINO IR exporter
+│   │   └── ov_infer.py                    ← OpenVINO inference engine
+│   │
+│   ├── torch_functional/                  ← tensor-only reference impl
+│   ├── torch_modules/                     ← nn.Module-based impl (for tracing)
+│   └── test_modules.py                    ← inference script for module-based stack
+│
+├── openivno_notebook_reference/           ← upstream OpenVINO notebook helper, kept for context
+├── qwen3_tts_transformers_reference/      ← upstream transformers impl, kept for context
+│
+├── CLAUDE_convert_from_functional_to_module.md
+└── snip_snip.py                           ← dev scratch
 ```
+
+---
+
+## 📚 API reference
+
+### `POST /synthesize`
+
+```json
+{
+  "text": "Hola Facu",
+  "speaker": "vivian",
+  "language": "spanish",
+  "temperature": 0.9,
+  "top_k": 50,
+  "top_p": 1.0,
+  "repetition_penalty": 1.05,
+  "max_new_tokens": 2048
+}
+```
+
+Response: `audio/wav` PCM 16-bit @ 24 kHz mono.
+
+Headers:
+- `X-RTF`
+- `X-Total-Time`
+- `X-Audio-Duration`
+- `X-Tokens-Per-Sec`
+
+### `POST /synthesize/json`
+
+Same request, returns `{audio_b64, sample_rate, metrics}` — useful when you
+want to inline the audio without writing a temp file.
+
+### `GET /speakers`
+
+Lists available speakers with codec IDs. Default: `vivian`.
+
+### `GET /health`
+
+Reports model status, device routing, and load time.
+
+---
+
+## 🎙️ Voices
+
+`serena`, **vivian** (default), `uncle_fu`, `ryan`, `aiden`, `ono_anna`,
+`sohee`, `eric`, `dylan`. Languages: `auto`, `english`, `chinese`, `spanish`,
+`german`, `french`, `italian`, `japanese`, `korean`, `portuguese`, `russian`,
+plus `beijing_dialect` and `sichuan_dialect`.
+
+Use `language: null` for auto-detect.
+
+---
+
+## ⚙️ Device routing
+
+OpenVINO lets you put each submodel on a different device. On mixed hardware
+this can matter a lot:
+
+| Submodel | Typical device | Why |
+|---|---|---|
+| `text_model` | GPU or CPU | small, either works |
+| `codec_embedding`, `cp_codec_embedding` | GPU or CPU | tiny lookup tables |
+| `talker` | **GPU** | large transformer, GPU is much faster |
+| `code_predictor` | **CPU** | empirically faster on x30w-k; the OV compiler picks better CPU kernels for sequential ops |
+| `speech_decoder` (vocoder) | **CPU on iGPU hardware** | INT8 iGPU path is broken on x30w-k; CPU is 15× faster *and* correct |
+
+---
+
+## 🔭 Verification: STT correlation
+
+After generating audio, verify it actually says what you asked:
+
+```bash
+curl -X POST http://your-parakeet-server:5092/v1/audio/transcriptions \
+  -F model=parakeet-tdt-0.6b-v3 \
+  -F file=@out.wav
+```
+
+Metrics like RMS / peak / zero-crossings only tell you about audio energy —
+they don't tell you the model said what you asked. STT correlation is the
+ground-truth check.
+
+---
+
+## 🤝 Contributing back to upstream
+
+Emerson's policy (from the original README):
+
+> PRs not related to OpenArc development may not be accepted, as this
+> implementation must remain *mostly* canonical.
+
+If you find a fix or improvement that should go to the original repo, open
+a PR there first. This fork is mainly for FastAPI serving and the
+`sd_device` workaround.
+
+---
+
+## 📜 Acknowledgements
+
+- **[Emerson Tatelbaum (@SearchSavior)](https://github.com/SearchSavior)** —
+  original Qwen3-TTS OpenVINO port, the OpenVINO IR export pipeline, the
+  `nn.Module` refactor, and the reference implementations.
+- **[OpenArc](https://github.com/SearchSavior/OpenArc)** — the project
+  this work was built to support.
+- **[OpenVINO Notebooks](https://github.com/openvinotoolkit/openvino_notebooks)**
+  — `qwen_3_tts_helper.py` was a reference for the original export work.
+- **[Qwen team @ Alibaba](https://arxiv.org/abs/2601.15621)** — for the
+  Qwen3-TTS Technical Report and the open-weight models.
+
+```bibtex
 @article{Qwen3-TTS,
   title={Qwen3-TTS Technical Report},
-  author={Hangrui Hu and Xinfa Zhu and Ting He and Dake Guo and Bin Zhang and Xiong Wang and Zhifang Guo and Ziyue Jiang and Hongkun Hao and Zishan Guo and Xinyu Zhang and Pei Zhang and Baosong Yang and Jin Xu and Jingren Zhou and Junyang Lin},
+  author={Hangrui Hu and Xinfa Zhu and Ting He and Dake Guo and Bin Zhang and
+          Xiong Wang and Zhifang Guo and Ziyue Jiang and Hongkun Hao and
+          Zishan Guo and Xinyu Zhang and Pei Zhang and Baosong Yang and
+          Jin Xu and Jingren Zhou and Junyang Lin},
   journal={arXiv preprint arXiv:2601.15621},
   year={2026}
 }
 ```
-
-[OpenVINO Notebooks](https://github.com/openvinotoolkit/openvino_notebooks)
-
-OpenArc community for their support
