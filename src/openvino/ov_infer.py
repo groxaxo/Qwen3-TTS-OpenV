@@ -202,6 +202,16 @@ class ModelLoadConfig(BaseModel):
     device: str = Field(default="CPU", description="OpenVINO device (e.g. 'CPU', 'GPU').")
     cp_device: str | None = Field(default=None, description="Override device for code predictor (e.g. 'CPU' when GPU produces NaN).")
     cp_f32: bool = Field(default=False, description="Force f32 precision for code predictor on GPU (fixes NaN with small models).")
+    sd_device: str | None = Field(
+        default=None,
+        description=(
+            "Override device for the speech decoder (vocoder). "
+            "Default = same as --device. On x30w-k iGPU the speech decoder is "
+            "the bottleneck (RTF ~7); forcing it to GPU may improve perf AND "
+            "fix output artifacts (CPU INT8 vocoder on small iGPU produces "
+            "low-RMS high-ZC garbage). If GPU gives NaN, fall back to CPU."
+        ),
+    )
     model_type: ModelType = Field(description="Which model variant to load.")
 
 
@@ -491,10 +501,12 @@ class OVQwen3TTS:
         self._text_model_c = core.compile_model(str(p / "text_model.xml"), device)
         self._codec_emb_c = core.compile_model(str(p / "codec_embedding.xml"), device)
         self._cp_codec_emb_c = core.compile_model(str(p / "cp_codec_embedding.xml"), device)
+        sd_device = config.sd_device or device
         self._decoder_c = core.compile_model(
-            str(p / "speech_tokenizer" / "speech_decoder.xml"), device,
+            str(p / "speech_tokenizer" / "speech_decoder.xml"), sd_device,
         )
         self._decoder_input_name = self._decoder_c.input(0).get_any_name()
+        self._sd_device = sd_device  # for /health and diagnostics
 
         talker_c = core.compile_model(str(p / "talker.xml"), device)
         self._talker_req = talker_c.create_infer_request()
@@ -517,8 +529,8 @@ class OVQwen3TTS:
         self._model_type = config.model_type
         self._loaded = True
         print(
-            f"[engine] loaded from {p}  device={device}  "
-            f"model_type={config.model_type.value}"
+            f"[engine] loaded from {p}  device={device}  sd_device={sd_device}  "
+            f"cp_device={cp_device}  model_type={config.model_type.value}"
         )
 
     async def unload_model(self):
@@ -1078,6 +1090,7 @@ mode usage:
     parser.add_argument("--output", default="output.wav", help="Output WAV path")
     parser.add_argument("--device", default="CPU", help="OpenVINO device")
     parser.add_argument("--cp-device", default=None, help="Override device for code predictor (e.g. CPU when GPU produces NaN)")
+    parser.add_argument("--sd-device", default=None, help="Override device for speech decoder (default: same as --device)")
     parser.add_argument("--cp-f32", action="store_true", help="Force f32 precision for code predictor on GPU (fixes NaN with small models)")
 
     # custom_voice
@@ -1158,7 +1171,7 @@ mode usage:
     engine = OVQwen3TTS()
     engine.load_model(ModelLoadConfig(
         ov_dir=args.ov_dir, device=args.device, cp_device=args.cp_device,
-        cp_f32=args.cp_f32, model_type=model_type,
+        sd_device=args.sd_device, cp_f32=args.cp_f32, model_type=model_type,
     ))
     wav, sr = engine.generate(request)
     asyncio.run(engine.unload_model())
